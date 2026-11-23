@@ -1,0 +1,1182 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#000000" />
+  <title>25:00</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+    html, body {
+      background-color: #000000;
+      color: #E5E7EB;
+      font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior: none;
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+    .gesture-stage {
+      touch-action: pan-y;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    /* Expanding wave / ripple effect on tap, double-tap, swipe */
+    .wave-ripple {
+      position: fixed;
+      border-radius: 9999px;
+      pointer-events: none;
+      transform: translate(-50%, -50%) scale(0.2);
+      opacity: 0.55;
+      animation: waveExpand 620ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      z-index: 20;
+    }
+    @keyframes waveExpand {
+      0% {
+        transform: translate(-50%, -50%) scale(0.15);
+        opacity: 0.6;
+      }
+      100% {
+        transform: translate(-50%, -50%) scale(2.8);
+        opacity: 0;
+      }
+    }
+    /* Subtle breathing glow when running */
+    .timer-running {
+      color: #F9FAFB;
+      text-shadow: 0 0 28px rgba(110, 231, 183, 0.14);
+    }
+    .timer-paused {
+      color: #6B7280;
+    }
+    .timer-break {
+      color: #86EFAC;
+    }
+    /* Custom minimal scrollbar */
+    ::-webkit-scrollbar {
+      width: 4px;
+      height: 4px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #000000;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #1F2937;
+      border-radius: 9999px;
+    }
+  </style>
+</head>
+<body class="bg-black text-gray-200 min-h-screen w-full overflow-hidden relative">
+
+  <!-- MAIN FULLSCREEN MINIMAL TIMER -->
+  <main id="gestureStage" class="gesture-stage fixed inset-0 bg-black flex flex-col items-center justify-center cursor-pointer">
+    <!-- Subtle Mode Icon (Focus / Break) -->
+    <div id="modeBadge" class="w-8 h-8 rounded-lg bg-[#141414] border border-white/10 flex items-center justify-center text-gray-400 mb-5 transition-colors duration-200 pointer-events-none">
+      <i id="modeIcon" data-lucide="book-open" class="w-4 h-4"></i>
+    </div>
+
+    <!-- HH:MM:SS Timer Digits -->
+    <div id="timeDisplay" class="tabular-nums font-extralight tracking-wider text-6xl sm:text-7xl md:text-8xl transition-colors duration-200 timer-paused pointer-events-none">
+      00:25:00
+    </div>
+
+    <!-- Tiny subtle active label pill (only shown if non-empty, ultra minimal) -->
+    <div id="activeLabelIndicator" class="mt-4 text-[11px] tracking-wide text-gray-600 pointer-events-none">
+    </div>
+
+    <!-- Floating +1m feedback badge -->
+    <div id="plusOneBadge" class="mt-2 text-xs font-medium text-emerald-400 opacity-0 transition-opacity duration-300 pointer-events-none">
+      +1 min
+    </div>
+  </main>
+
+  <!-- BOTTOM CENTER: End & Save Early (only visible while Focus session has elapsed time) -->
+  <button id="endEarlyBtn" type="button" title="End & save session"
+    class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-30 items-center gap-1.5 px-3.5 py-2 rounded-full bg-[#141414] border border-white/10 text-xs text-gray-300 hover:text-emerald-300 hover:border-emerald-400/30 active:scale-95 transition">
+    <i data-lucide="check" class="w-3.5 h-3.5 text-emerald-400"></i>
+    <span>End &amp; Save</span>
+  </button>
+
+  <!-- BOTTOM LEFT: Settings / Menu Button + Label Button -->
+  <div class="fixed bottom-6 left-6 z-30 flex items-center gap-2">
+    <button id="openSettingsBtn" type="button" aria-label="Menu"
+      class="w-10 h-10 rounded-full flex items-center justify-center text-gray-500 hover:text-gray-200 hover:bg-white/5 active:scale-95 transition">
+      <i data-lucide="list" class="w-5 h-5"></i>
+    </button>
+    <button id="openLabelBtn" type="button" aria-label="Session Label"
+      class="w-10 h-10 rounded-full flex items-center justify-center text-gray-500 hover:text-gray-200 hover:bg-white/5 active:scale-95 transition">
+      <i data-lucide="tag" class="w-4 h-4"></i>
+    </button>
+  </div>
+
+  <!-- BOTTOM RIGHT: Session Count -->
+  <div class="fixed bottom-6 right-6 z-30 flex items-center">
+    <button id="sessionCountPill" type="button" title="Sessions completed today"
+      class="w-8 h-8 rounded-full bg-[#141414] border border-white/10 text-xs font-medium tabular-nums text-gray-400 flex items-center justify-center hover:border-white/20 transition">
+      0
+    </button>
+  </div>
+
+  <!-- LABEL PICKER MODAL (Bottom Right Trigger) -->
+  <div id="labelModal" class="hidden fixed inset-0 z-40 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+    <div class="w-full max-w-sm rounded-2xl bg-[#0D0D0D] border border-white/10 p-5 flex flex-col gap-4">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-medium text-gray-300">Session Label</span>
+        <button id="closeLabelBtn" type="button" class="text-gray-500 hover:text-white p-1">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div id="labelChips" class="flex flex-wrap gap-2"></div>
+
+      <form id="addLabelForm" class="flex gap-2">
+        <input id="newLabelInput" type="text" maxlength="24" placeholder="New label..."
+          class="flex-1 bg-black border border-white/10 rounded-xl px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-400/50" />
+        <button type="submit"
+          class="px-3.5 py-2 rounded-xl bg-emerald-400/15 border border-emerald-400/30 text-xs font-medium text-emerald-300 hover:bg-emerald-400/25 transition">
+          Add
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- SETTINGS DRAWER / OVERLAY (Bottom Left Trigger: 1. Stats, 2. Timer Profile & Cloud Sync) -->
+  <div id="settingsOverlay" class="hidden fixed inset-0 z-40 bg-black flex flex-col">
+    <!-- Top Header -->
+    <header class="flex items-center justify-between px-4 py-3.5 border-b border-white/10 shrink-0">
+      <div class="flex items-center gap-3">
+        <button id="closeSettingsBtn" type="button" class="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/5">
+          <i data-lucide="arrow-left" class="w-5 h-5"></i>
+        </button>
+        <h1 class="text-base font-medium text-gray-100">Settings</h1>
+      </div>
+      <div id="cloudStatusDot" class="flex items-center gap-1.5 text-[11px] text-gray-500">
+        <span id="cloudDot" class="w-2 h-2 rounded-full bg-gray-600"></span>
+        <span id="cloudStatusText">Local</span>
+      </div>
+    </header>
+
+    <!-- 2 Tabs: Stats | Timer Profile -->
+    <nav class="grid grid-cols-2 border-b border-white/10 shrink-0">
+      <button id="subTabStats" type="button"
+        class="py-3 text-xs font-medium text-emerald-300 border-b-2 border-emerald-300 transition">
+        Stats
+      </button>
+      <button id="subTabProfile" type="button"
+        class="py-3 text-xs font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition">
+        Timer Profile
+      </button>
+    </nav>
+
+    <!-- TAB 1: STATS -->
+    <div id="panelStats" class="flex-1 overflow-y-auto p-4 sm:p-6 flex flex-col gap-6 max-w-2xl w-full mx-auto">
+      <!-- Overview KPIs -->
+      <div>
+        <p class="text-xs font-medium text-emerald-300 mb-3">Overview</p>
+        <div class="grid grid-cols-4 gap-2 text-center">
+          <div class="py-2">
+            <p id="kpiToday" class="text-sm font-medium text-emerald-300 tabular-nums">0min</p>
+            <p class="text-[11px] text-gray-500 mt-0.5">Today</p>
+          </div>
+          <div class="py-2">
+            <p id="kpiWeek" class="text-sm font-medium text-emerald-300 tabular-nums">0min</p>
+            <p class="text-[11px] text-gray-500 mt-0.5">This Week</p>
+          </div>
+          <div class="py-2">
+            <p id="kpiMonth" class="text-sm font-medium text-emerald-300 tabular-nums">0min</p>
+            <p class="text-[11px] text-gray-500 mt-0.5">This Month</p>
+          </div>
+          <div class="py-2">
+            <p id="kpiTotal" class="text-sm font-medium text-emerald-300 tabular-nums">0min</p>
+            <p class="text-[11px] text-gray-500 mt-0.5">Total</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- History Area Line Chart -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-xs font-medium text-emerald-300">History</p>
+          <span class="text-[11px] text-gray-500">Last 7 Days</span>
+        </div>
+        <div class="relative h-48 w-full">
+          <canvas id="historyChart"></canvas>
+        </div>
+      </div>
+
+      <!-- Productive Hours Strip -->
+      <div>
+        <p class="text-xs font-medium text-emerald-300 mb-3">Productive hours</p>
+        <div id="productiveHoursGrid" class="grid grid-cols-12 gap-1.5"></div>
+        <div class="flex justify-between text-[10px] text-gray-500 mt-1.5 px-0.5">
+          <span>6 AM</span>
+          <span>12 PM</span>
+          <span>6 PM</span>
+          <span>12 AM</span>
+        </div>
+      </div>
+
+      <!-- Recent Sessions Timeline -->
+      <div>
+        <div class="flex items-center justify-between mb-2.5">
+          <p class="text-xs font-medium text-emerald-300">Timeline</p>
+          <button id="clearHistoryBtn" type="button" class="text-[11px] text-gray-600 hover:text-rose-400 transition">
+            Clear
+          </button>
+        </div>
+        <div id="timelineList" class="flex flex-col gap-2"></div>
+      </div>
+    </div>
+
+    <!-- TAB 2: TIMER PROFILE & FIREBASE CLOUD SYNC -->
+    <div id="panelProfile" class="hidden flex-1 overflow-y-auto p-4 sm:p-6 flex-col gap-5 max-w-2xl w-full mx-auto">
+      <!-- Timer Profile Durations -->
+      <div class="rounded-2xl bg-[#0D0D0D] border border-white/10 p-4 flex flex-col gap-4">
+        <p class="text-xs font-medium text-emerald-300">Timer Profile</p>
+
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm text-gray-200">Focus</p>
+            <p class="text-[11px] text-gray-500">Minutes</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="profFocusMinus" type="button" class="w-8 h-8 rounded-lg bg-black border border-white/10 text-xs text-gray-300 hover:border-white/25">-5</button>
+            <input id="profFocusInput" type="number" min="1" max="360" value="25"
+              class="w-16 text-center bg-black border border-white/10 rounded-lg py-1.5 text-sm tabular-nums text-gray-100 focus:outline-none focus:border-emerald-400/50" />
+            <button id="profFocusPlus" type="button" class="w-8 h-8 rounded-lg bg-black border border-white/10 text-xs text-gray-300 hover:border-white/25">+5</button>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm text-gray-200">Break</p>
+            <p class="text-[11px] text-gray-500">Minutes</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="profBreakMinus" type="button" class="w-8 h-8 rounded-lg bg-black border border-white/10 text-xs text-gray-300 hover:border-white/25">-1</button>
+            <input id="profBreakInput" type="number" min="1" max="120" value="5"
+              class="w-16 text-center bg-black border border-white/10 rounded-lg py-1.5 text-sm tabular-nums text-gray-100 focus:outline-none focus:border-emerald-400/50" />
+            <button id="profBreakPlus" type="button" class="w-8 h-8 rounded-lg bg-black border border-white/10 text-xs text-gray-300 hover:border-white/25">+1</button>
+          </div>
+        </div>
+
+        <!-- Quick Presets -->
+        <div class="grid grid-cols-3 gap-2 pt-1">
+          <button type="button" data-profile="25-5" class="profile-preset py-2 rounded-xl bg-black border border-white/10 text-xs text-gray-300 hover:border-emerald-400/40">25 / 5m</button>
+          <button type="button" data-profile="50-10" class="profile-preset py-2 rounded-xl bg-black border border-white/10 text-xs text-gray-300 hover:border-emerald-400/40">50 / 10m</button>
+          <button type="button" data-profile="90-15" class="profile-preset py-2 rounded-xl bg-black border border-white/10 text-xs text-gray-300 hover:border-emerald-400/40">90 / 15m</button>
+        </div>
+
+        <!-- Sound Toggle -->
+        <div class="flex items-center justify-between pt-2 border-t border-white/10">
+          <span class="text-xs text-gray-300">Completion Sound</span>
+          <button id="toggleSoundBtn" type="button"
+            class="px-3 py-1 rounded-full text-xs font-medium bg-emerald-400/15 text-emerald-300 border border-emerald-400/30">
+            On
+          </button>
+        </div>
+      </div>
+
+      <!-- GitHub Gist Permanent Sync -->
+      <div class="rounded-2xl bg-[#0D0D0D] border border-white/10 p-4 flex flex-col gap-3">
+        <div class="flex items-center justify-between">
+          <p class="text-xs font-medium text-emerald-300">GitHub Gist Sync</p>
+          <span id="syncFeedback" class="text-[11px] text-gray-500">Not connected</span>
+        </div>
+        <p class="text-[11px] text-gray-500 leading-relaxed">
+          Paste your GitHub Token (with <span class="text-gray-300">gist</span> scope). Leave Gist ID blank on your first device and click Create; paste that Gist ID once on your second device.
+        </p>
+
+        <input id="ghTokenInput" type="password" placeholder="GitHub Token (ghp_... or github_pat_...)"
+          class="w-full bg-black border border-white/10 rounded-xl px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-400/50" />
+
+        <div class="flex gap-2">
+          <input id="syncKeyInput" type="text" placeholder="Gist ID (auto-filled when you click Create)"
+            class="flex-1 bg-black border border-white/10 rounded-xl px-3 py-2 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-400/50" />
+          <button id="genSyncKeyBtn" type="button"
+            class="px-3 py-2 rounded-xl bg-black border border-white/10 text-xs text-gray-300 hover:border-white/25 transition">
+            Create
+          </button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <button id="saveCloudBtn" type="button"
+            class="py-2 rounded-xl bg-emerald-400/15 border border-emerald-400/30 text-xs font-medium text-emerald-300 hover:bg-emerald-400/25 transition">
+            Connect &amp; Sync
+          </button>
+          <button id="resetTimerNowBtn" type="button"
+            class="py-2 rounded-xl bg-black border border-white/10 text-xs text-gray-300 hover:border-white/25 transition">
+            Reset Timer
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Minimal Toast -->
+  <div id="toast" class="pointer-events-none fixed top-6 left-1/2 -translate-x-1/2 z-50 opacity-0 transition-opacity duration-200">
+    <div id="toastMsg" class="px-3.5 py-1.5 rounded-full bg-[#141414] border border-white/10 text-xs text-gray-200"></div>
+  </div>
+
+  <script>
+    (function () {
+      const STORAGE_KEY = 'minimal_study_timer_v2';
+
+      const defaultState = {
+        focusMinutes: 25,
+        breakMinutes: 5,
+        soundEnabled: true,
+        activeLabel: '',
+        labels: [],
+        sessions: [], // { id, label, durationSec, completedAt }
+        ghToken: '',
+        syncKey: ''
+      };
+
+      let state = loadState();
+      let mode = 'focus'; // 'focus' | 'break'
+      let isRunning = false;
+      let totalSeconds = state.focusMinutes * 60;
+      let remainingSeconds = totalSeconds;
+      let intervalId = null;
+      let historyChartInstance = null;
+      let toastTimer = null;
+
+      // DOM refs
+      const gestureStage = document.getElementById('gestureStage');
+      const timeDisplay = document.getElementById('timeDisplay');
+      const modeBadge = document.getElementById('modeBadge');
+      const modeIcon = document.getElementById('modeIcon');
+      const activeLabelIndicator = document.getElementById('activeLabelIndicator');
+      const plusOneBadge = document.getElementById('plusOneBadge');
+
+      const openSettingsBtn = document.getElementById('openSettingsBtn');
+      const closeSettingsBtn = document.getElementById('closeSettingsBtn');
+      const settingsOverlay = document.getElementById('settingsOverlay');
+      const subTabStats = document.getElementById('subTabStats');
+      const subTabProfile = document.getElementById('subTabProfile');
+      const panelStats = document.getElementById('panelStats');
+      const panelProfile = document.getElementById('panelProfile');
+
+      const openLabelBtn = document.getElementById('openLabelBtn');
+      const closeLabelBtn = document.getElementById('closeLabelBtn');
+      const labelModal = document.getElementById('labelModal');
+      const labelChips = document.getElementById('labelChips');
+      const addLabelForm = document.getElementById('addLabelForm');
+      const newLabelInput = document.getElementById('newLabelInput');
+      const sessionCountPill = document.getElementById('sessionCountPill');
+      const endEarlyBtn = document.getElementById('endEarlyBtn');
+
+      const profFocusInput = document.getElementById('profFocusInput');
+      const profBreakInput = document.getElementById('profBreakInput');
+      const toggleSoundBtn = document.getElementById('toggleSoundBtn');
+      const ghTokenInput = document.getElementById('ghTokenInput');
+      const syncKeyInput = document.getElementById('syncKeyInput');
+      const saveCloudBtn = document.getElementById('saveCloudBtn');
+      const syncFeedback = document.getElementById('syncFeedback');
+      const cloudDot = document.getElementById('cloudDot');
+      const cloudStatusText = document.getElementById('cloudStatusText');
+
+      // Storage
+      function loadState() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return structuredClone(defaultState);
+          const p = JSON.parse(raw);
+          return {
+            focusMinutes: clampInt(p.focusMinutes, 1, 360, 25),
+            breakMinutes: clampInt(p.breakMinutes, 1, 120, 5),
+            soundEnabled: typeof p.soundEnabled === 'boolean' ? p.soundEnabled : true,
+            activeLabel: typeof p.activeLabel === 'string' ? p.activeLabel.trim() : '',
+            labels: Array.isArray(p.labels) ? p.labels : [],
+            sessions: Array.isArray(p.sessions) ? p.sessions : [],
+            ghToken: typeof p.ghToken === 'string' ? p.ghToken : '',
+            syncKey: typeof p.syncKey === 'string' ? p.syncKey : ''
+          };
+        } catch (e) {
+          return structuredClone(defaultState);
+        }
+      }
+
+      function saveState() {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      function clampInt(val, min, max, fallback) {
+        const n = parseInt(val, 10);
+        return isNaN(n) ? fallback : Math.min(max, Math.max(min, n));
+      }
+
+      function escapeHtml(str) {
+        return String(str)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+          .replace(/'/g, '&#39;');
+      }
+
+      function formatHHMMSS(sec) {
+        const h = Math.floor(sec / 3600);
+        const m = Math.floor((sec % 3600) / 60);
+        const s = sec % 60;
+        const parts = h > 0 ? [h, m, s] : [m, s];
+        return parts.map(v => String(v).padStart(2, '0')).join(':');
+      }
+
+      function formatShortMin(sec) {
+        const mins = Math.round(sec / 60);
+        if (mins < 60) return mins + 'min';
+        const h = Math.floor(mins / 60);
+        const m = mins % 60;
+        return m > 0 ? `${h}h ${m}min` : `${h}h`;
+      }
+
+      function showToast(msg) {
+        const toast = document.getElementById('toast');
+        document.getElementById('toastMsg').textContent = msg;
+        toast.classList.remove('opacity-0');
+        toast.classList.add('opacity-100');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          toast.classList.remove('opacity-100');
+          toast.classList.add('opacity-0');
+        }, 1800);
+      }
+
+      // Wave / Ripple visual feedback
+      function spawnWave(x, y, color) {
+        const wave = document.createElement('div');
+        wave.className = 'wave-ripple';
+        wave.style.left = x + 'px';
+        wave.style.top = y + 'px';
+        wave.style.width = '110px';
+        wave.style.height = '110px';
+        wave.style.border = `2px solid ${color}`;
+        wave.style.background = color.replace('0.8', '0.12').replace('0.7', '0.12');
+        document.body.appendChild(wave);
+        setTimeout(() => wave.remove(), 650);
+      }
+
+      // Notification sound (Web Audio API)
+      function playOverSound() {
+        if (!state.soundEnabled) return;
+        try {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (!AudioCtx) return;
+          const ctx = new AudioCtx();
+          const now = ctx.currentTime;
+          [587.33, 739.99, 880, 1174.66].forEach((freq, i) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, now + i * 0.14);
+            gain.gain.setValueAtTime(0.001, now + i * 0.14);
+            gain.gain.exponentialRampToValueAtTime(0.18, now + i * 0.14 + 0.03);
+            gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.14 + 0.55);
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.start(now + i * 0.14);
+            osc.stop(now + i * 0.14 + 0.58);
+          });
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      // Timer Core
+      function startTimer() {
+        if (isRunning) return;
+        clearInterval(intervalId);
+        isRunning = true;
+        intervalId = setInterval(() => {
+          if (remainingSeconds > 0) {
+            remainingSeconds -= 1;
+            renderTimer();
+          } else {
+            onSessionOver();
+          }
+        }, 1000);
+        renderTimer();
+      }
+
+      function pauseTimer() {
+        if (!isRunning) return;
+        clearInterval(intervalId);
+        intervalId = null;
+        isRunning = false;
+        renderTimer();
+      }
+
+      function togglePlayPause(x, y) {
+        if (isRunning) {
+          pauseTimer();
+          spawnWave(x, y, 'rgba(156, 163, 175, 0.7)');
+        } else {
+          startTimer();
+          spawnWave(x, y, mode === 'focus' ? 'rgba(110, 231, 183, 0.8)' : 'rgba(134, 239, 172, 0.8)');
+        }
+      }
+
+      function addOneMinute(x, y) {
+        remainingSeconds += 60;
+        totalSeconds += 60;
+        spawnWave(x, y, 'rgba(110, 231, 183, 0.85)');
+        plusOneBadge.classList.remove('opacity-0');
+        plusOneBadge.classList.add('opacity-100');
+        setTimeout(() => {
+          plusOneBadge.classList.remove('opacity-100');
+          plusOneBadge.classList.add('opacity-0');
+        }, 800);
+        renderTimer();
+      }
+
+      function endEarlySession() {
+        if (mode !== 'focus') return;
+        const elapsed = totalSeconds - remainingSeconds;
+        if (elapsed < 10) {
+          showToast('Study at least 10s to record');
+          return;
+        }
+        pauseTimer();
+        logSession(elapsed);
+        totalSeconds = state.focusMinutes * 60;
+        remainingSeconds = totalSeconds;
+        spawnWave(window.innerWidth / 2, window.innerHeight / 2, 'rgba(110, 231, 183, 0.85)');
+        renderTimer();
+        showToast('Saved ' + formatShortMin(elapsed) + (state.activeLabel ? ' · ' + state.activeLabel : ''));
+      }
+
+      function switchNextSession(x, y) {
+        if (mode === 'focus') {
+          const elapsed = totalSeconds - remainingSeconds;
+          if (elapsed >= 10) {
+            logSession(elapsed);
+          }
+          mode = 'break';
+        } else {
+          mode = 'focus';
+        }
+        pauseTimer();
+        totalSeconds = (mode === 'focus' ? state.focusMinutes : state.breakMinutes) * 60;
+        remainingSeconds = totalSeconds;
+        spawnWave(x, y, 'rgba(96, 165, 250, 0.75)');
+        renderTimer();
+        showToast(mode === 'focus' ? 'Focus session' : 'Break session');
+      }
+
+      function onSessionOver() {
+        pauseTimer();
+        playOverSound();
+        if (mode === 'focus') {
+          logSession(totalSeconds);
+          mode = 'break';
+          showToast('Focus complete · Break ready');
+        } else {
+          mode = 'focus';
+          showToast('Break over · Focus ready');
+        }
+        totalSeconds = (mode === 'focus' ? state.focusMinutes : state.breakMinutes) * 60;
+        remainingSeconds = totalSeconds;
+        renderTimer();
+      }
+
+      function logSession(durationSec) {
+        state.sessions.unshift({
+          id: 's_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7),
+          label: state.activeLabel || 'Unlabeled',
+          durationSec: durationSec,
+          completedAt: new Date().toISOString()
+        });
+        saveState();
+        renderTimer();
+        syncWithCloud(true);
+      }
+
+      // Renderers
+      function renderTimer() {
+        const str = formatHHMMSS(remainingSeconds);
+        timeDisplay.textContent = str;
+        document.title = str + (mode === 'break' ? ' · Break' : '');
+
+        timeDisplay.classList.remove('timer-running', 'timer-paused', 'timer-break');
+        if (mode === 'break') {
+          timeDisplay.classList.add(isRunning ? 'timer-break' : 'timer-paused');
+          modeIcon.setAttribute('data-lucide', 'coffee');
+        } else {
+          timeDisplay.classList.add(isRunning ? 'timer-running' : 'timer-paused');
+          modeIcon.setAttribute('data-lucide', 'book-open');
+        }
+        activeLabelIndicator.textContent = mode === 'focus' ? (state.activeLabel || '') : 'Break';
+
+        const todayStr = new Date().toDateString();
+        const todayCount = state.sessions.filter(s => new Date(s.completedAt).toDateString() === todayStr).length;
+        sessionCountPill.textContent = String(todayCount);
+
+        const elapsed = totalSeconds - remainingSeconds;
+        if (mode === 'focus' && elapsed >= 10) {
+          endEarlyBtn.classList.remove('hidden');
+          endEarlyBtn.classList.add('flex');
+        } else {
+          endEarlyBtn.classList.add('hidden');
+          endEarlyBtn.classList.remove('flex');
+        }
+
+        if (window.lucide) lucide.createIcons();
+      }
+
+      function renderLabels() {
+        if (state.labels.length === 0) {
+          labelChips.innerHTML = '<p class="text-xs text-gray-600 py-1">No labels yet. Add your own below.</p>';
+          return;
+        }
+        labelChips.innerHTML = state.labels.map(lbl => {
+          const active = lbl === state.activeLabel;
+          return `
+            <div class="inline-flex items-center rounded-xl border transition ${
+              active
+                ? 'bg-emerald-400/15 text-emerald-300 border-emerald-400/40'
+                : 'bg-black text-gray-400 border-white/10 hover:text-gray-200'
+            }">
+              <button type="button" data-lbl="${escapeHtml(lbl)}" class="lbl-chip px-3 py-1.5 text-xs">
+                ${escapeHtml(lbl)}
+              </button>
+              <button type="button" data-del-lbl="${escapeHtml(lbl)}" aria-label="Delete label"
+                class="del-lbl-btn pr-2 pl-0.5 py-1.5 text-gray-600 hover:text-rose-400 text-xs leading-none">
+                ×
+              </button>
+            </div>
+          `;
+        }).join('');
+
+        labelChips.querySelectorAll('.lbl-chip').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const clicked = btn.getAttribute('data-lbl');
+            state.activeLabel = state.activeLabel === clicked ? '' : clicked;
+            saveState();
+            renderLabels();
+            renderTimer();
+            labelModal.classList.add('hidden');
+            syncWithCloud(true);
+          });
+        });
+
+        labelChips.querySelectorAll('.del-lbl-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const target = btn.getAttribute('data-del-lbl');
+            state.labels = state.labels.filter(l => l !== target);
+            if (state.activeLabel === target) state.activeLabel = '';
+            saveState();
+            renderLabels();
+            renderTimer();
+            syncWithCloud(true);
+          });
+        });
+      }
+
+      function renderStats() {
+        const now = new Date();
+        const todayStr = now.toDateString();
+        const weekAgo = new Date(now.getTime() - 6 * 86400000);
+        weekAgo.setHours(0, 0, 0, 0);
+
+        let todaySec = 0, weekSec = 0, monthSec = 0, totalSec = 0;
+        const dayBuckets = {};
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date(now.getTime() - i * 86400000);
+          dayBuckets[d.toDateString()] = { label: String(d.getDate()), sec: 0 };
+        }
+        const hourCounts = new Array(24).fill(0);
+
+        state.sessions.forEach(s => {
+          const dt = new Date(s.completedAt);
+          totalSec += s.durationSec;
+          if (dt.toDateString() === todayStr) todaySec += s.durationSec;
+          if (dt >= weekAgo) weekSec += s.durationSec;
+          if (dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear()) monthSec += s.durationSec;
+          if (dayBuckets[dt.toDateString()]) dayBuckets[dt.toDateString()].sec += s.durationSec;
+          hourCounts[dt.getHours()] += s.durationSec;
+        });
+
+        document.getElementById('kpiToday').textContent = formatShortMin(todaySec);
+        document.getElementById('kpiWeek').textContent = formatShortMin(weekSec);
+        document.getElementById('kpiMonth').textContent = formatShortMin(monthSec);
+        document.getElementById('kpiTotal').textContent = formatShortMin(totalSec);
+
+        // History Area Chart
+        const chartLabels = Object.values(dayBuckets).map(b => b.label);
+        const chartData = Object.values(dayBuckets).map(b => Math.round((b.sec / 60) * 10) / 10);
+        const ctx = document.getElementById('historyChart').getContext('2d');
+        if (historyChartInstance) historyChartInstance.destroy();
+
+        const grad = ctx.createLinearGradient(0, 0, 0, 180);
+        grad.addColorStop(0, 'rgba(110, 231, 183, 0.35)');
+        grad.addColorStop(1, 'rgba(110, 231, 183, 0.0)');
+
+        historyChartInstance = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: chartLabels,
+            datasets: [{
+              data: chartData,
+              borderColor: '#6EE7B7',
+              backgroundColor: grad,
+              borderWidth: 2,
+              pointRadius: 3,
+              pointBackgroundColor: '#6EE7B7',
+              fill: true,
+              tension: 0.25
+            }]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { grid: { display: false }, ticks: { color: '#6B7280', font: { size: 11 } } },
+              y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#6B7280', font: { size: 11 } } }
+            }
+          }
+        });
+
+        // Productive Hours (6 AM -> 5 AM collapsed to 12 two-hour blocks)
+        const maxHour = Math.max(1, ...hourCounts);
+        const grid = document.getElementById('productiveHoursGrid');
+        let blocksHtml = '';
+        for (let b = 0; b < 12; b++) {
+          const h1 = (6 + b * 2) % 24;
+          const h2 = (7 + b * 2) % 24;
+          const val = hourCounts[h1] + hourCounts[h2];
+          const intensity = val / (maxHour * 1.5);
+          let bg = 'bg-[#141414]';
+          if (intensity > 0.6) bg = 'bg-emerald-300';
+          else if (intensity > 0.25) bg = 'bg-emerald-400/60';
+          else if (val > 0) bg = 'bg-emerald-400/25';
+          blocksHtml += `<div class="h-6 rounded ${bg}" title="${h1}:00–${h2}:59"></div>`;
+        }
+        grid.innerHTML = blocksHtml;
+
+        // Timeline
+        const list = document.getElementById('timelineList');
+        if (state.sessions.length === 0) {
+          list.innerHTML = '<p class="text-xs text-gray-600 py-4 text-center">No sessions recorded yet.</p>';
+        } else {
+          list.innerHTML = state.sessions.slice(0, 25).map(s => {
+            const dt = new Date(s.completedAt);
+            const tStr = dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const dStr = dt.toLocaleDateString([], { month: 'short', day: 'numeric' });
+            return `
+              <div class="flex items-center justify-between py-2 border-b border-white/5 text-xs">
+                <div>
+                  <span class="text-gray-200">${escapeHtml(s.label)}</span>
+                  <span class="text-gray-600 ml-2">${dStr} · ${tStr}</span>
+                </div>
+                <span class="text-emerald-300 tabular-nums">${formatShortMin(s.durationSec)}</span>
+              </div>
+            `;
+          }).join('');
+        }
+      }
+
+      function renderProfile() {
+        profFocusInput.value = state.focusMinutes;
+        profBreakInput.value = state.breakMinutes;
+        toggleSoundBtn.textContent = state.soundEnabled ? 'On' : 'Off';
+        toggleSoundBtn.className = state.soundEnabled
+          ? 'px-3 py-1 rounded-full text-xs font-medium bg-emerald-400/15 text-emerald-300 border border-emerald-400/30'
+          : 'px-3 py-1 rounded-full text-xs font-medium bg-black text-gray-500 border border-white/10';
+        ghTokenInput.value = state.ghToken || '';
+        syncKeyInput.value = state.syncKey || '';
+        updateCloudBadge();
+      }
+
+      function updateCloudBadge(statusText, isOk) {
+        if (statusText) {
+          syncFeedback.textContent = statusText;
+          cloudStatusText.textContent = isOk ? 'Synced' : 'Local';
+          cloudDot.className = 'w-2 h-2 rounded-full ' + (isOk ? 'bg-emerald-400' : 'bg-amber-400');
+        } else if (state.ghToken && state.syncKey) {
+          syncFeedback.textContent = 'Ready';
+          cloudStatusText.textContent = 'Cloud';
+          cloudDot.className = 'w-2 h-2 rounded-full bg-emerald-400';
+        } else {
+          syncFeedback.textContent = 'Not configured';
+          cloudStatusText.textContent = 'Local';
+          cloudDot.className = 'w-2 h-2 rounded-full bg-gray-600';
+        }
+      }
+
+      // Permanent Cloud Sync via Private GitHub Gist
+      const GIST_FILENAME = 'focussync-data.json';
+
+      function cleanGistId(raw) {
+        return (raw || '').trim().replace(/^https?:\/\/gist\.github\.com\/[^/]+\//, '').replace(/[^a-zA-Z0-9]/g, '');
+      }
+
+      async function createCloudSyncId() {
+        const token = ghTokenInput.value.trim();
+        if (!token) {
+          updateCloudBadge('Paste GitHub Token first', false);
+          showToast('Paste your GitHub Token first');
+          return;
+        }
+        state.ghToken = token;
+        saveState();
+
+        try {
+          updateCloudBadge('Creating Gist...', true);
+          const payload = {
+            focusMinutes: state.focusMinutes,
+            breakMinutes: state.breakMinutes,
+            labels: state.labels,
+            sessions: state.sessions,
+            updatedAt: new Date().toISOString()
+          };
+          const res = await fetch('https://api.github.com/gists', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + token,
+              'Accept': 'application/vnd.github+json',
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              description: 'FocusSync Study Timer Data',
+              public: false,
+              files: {
+                [GIST_FILENAME]: { content: JSON.stringify(payload, null, 2) }
+              }
+            })
+          });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const data = await res.json();
+          const gistId = data && data.id ? String(data.id) : '';
+          if (!gistId) throw new Error('No Gist ID returned');
+          state.syncKey = gistId;
+          syncKeyInput.value = gistId;
+          saveState();
+          updateCloudBadge('Connected & synced', true);
+          showToast('Private Gist created! Copy Gist ID to your other device.');
+        } catch (err) {
+          updateCloudBadge('Create failed (' + (err.message || 'network') + ')', false);
+          showToast('Could not create Gist');
+        }
+      }
+
+      async function syncWithCloud(silent = false) {
+        const token = (state.ghToken || '').trim();
+        const gistId = cleanGistId(state.syncKey);
+        if (!token || !gistId) return;
+
+        const endpoint = `https://api.github.com/gists/${gistId}`;
+        const headers = {
+          'Authorization': 'Bearer ' + token,
+          'Accept': 'application/vnd.github+json',
+          'Content-Type': 'application/json'
+        };
+
+        try {
+          if (!silent) updateCloudBadge('Syncing...', true);
+          const res = await fetch(endpoint, { headers });
+          if (res.ok) {
+            const gist = await res.json();
+            const fileObj = gist && gist.files && gist.files[GIST_FILENAME];
+            if (fileObj && fileObj.content) {
+              const remote = JSON.parse(fileObj.content);
+              const existingIds = new Set(state.sessions.map(s => s.id));
+              if (Array.isArray(remote.sessions)) {
+                remote.sessions.forEach(s => {
+                  if (s && s.id && !existingIds.has(s.id) && typeof s.durationSec === 'number') {
+                    state.sessions.push(s);
+                    existingIds.add(s.id);
+                  }
+                });
+                state.sessions.sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt));
+              }
+              if (Array.isArray(remote.labels)) {
+                remote.labels.forEach(l => {
+                  if (typeof l === 'string' && l.trim() && !state.labels.includes(l)) {
+                    state.labels.push(l);
+                  }
+                });
+              }
+              if (typeof remote.focusMinutes === 'number') {
+                state.focusMinutes = clampInt(remote.focusMinutes, 1, 360, state.focusMinutes);
+              }
+              if (typeof remote.breakMinutes === 'number') {
+                state.breakMinutes = clampInt(remote.breakMinutes, 1, 120, state.breakMinutes);
+              }
+            }
+          }
+
+          const payload = {
+            focusMinutes: state.focusMinutes,
+            breakMinutes: state.breakMinutes,
+            labels: state.labels,
+            sessions: state.sessions,
+            updatedAt: new Date().toISOString()
+          };
+
+          const patchRes = await fetch(endpoint, {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({
+              files: {
+                [GIST_FILENAME]: { content: JSON.stringify(payload, null, 2) }
+              }
+            })
+          });
+          if (!patchRes.ok) throw new Error('HTTP ' + patchRes.status);
+
+          saveState();
+          renderTimer();
+          renderLabels();
+          if (!panelStats.classList.contains('hidden')) renderStats();
+          if (!panelProfile.classList.contains('hidden')) renderProfile();
+          updateCloudBadge('Synced', true);
+          if (!silent) showToast('Synced with Gist!');
+        } catch (err) {
+          updateCloudBadge('Sync error (' + (err.message || 'offline') + ')', false);
+          if (!silent) showToast('Sync failed · Saved locally');
+        }
+      }
+
+      // Gesture Handling: Single Tap (Play/Pause), Double Tap (+1 min), Swipe (Next Session)
+      let startX = null, startY = null, swiped = false;
+      let tapTimeout = null;
+      let lastTapTime = 0;
+
+      function onPointerStart(x, y) {
+        startX = x;
+        startY = y;
+        swiped = false;
+      }
+
+      function onPointerMove(x, y) {
+        if (startX === null) return;
+        const dx = x - startX;
+        const dy = y - startY;
+        if (Math.abs(dx) > 45 && Math.abs(dx) > Math.abs(dy)) {
+          swiped = true;
+        }
+      }
+
+      function onPointerEnd(x, y) {
+        if (startX === null) return;
+        const dx = x - startX;
+        const dy = y - startY;
+        startX = null;
+        startY = null;
+
+        if (swiped || (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy))) {
+          clearTimeout(tapTimeout);
+          switchNextSession(x, y);
+          return;
+        }
+
+        if (Math.abs(dx) < 14 && Math.abs(dy) < 14) {
+          const now = Date.now();
+          if (now - lastTapTime < 260) {
+            clearTimeout(tapTimeout);
+            lastTapTime = 0;
+            addOneMinute(x, y);
+          } else {
+            lastTapTime = now;
+            tapTimeout = setTimeout(() => {
+              togglePlayPause(x, y);
+            }, 240);
+          }
+        }
+      }
+
+      gestureStage.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) onPointerStart(e.touches[0].clientX, e.touches[0].clientY);
+      }, { passive: true });
+      gestureStage.addEventListener('touchmove', (e) => {
+        if (e.touches.length === 1) onPointerMove(e.touches[0].clientX, e.touches[0].clientY);
+      }, { passive: true });
+      gestureStage.addEventListener('touchend', (e) => {
+        if (e.changedTouches.length === 1) onPointerEnd(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
+      });
+
+      gestureStage.addEventListener('mousedown', (e) => {
+        if (e.button === 0) onPointerStart(e.clientX, e.clientY);
+      });
+      window.addEventListener('mousemove', (e) => {
+        if (startX !== null) onPointerMove(e.clientX, e.clientY);
+      });
+      window.addEventListener('mouseup', (e) => {
+        if (startX !== null) onPointerEnd(e.clientX, e.clientY);
+      });
+
+      // Keyboard shortcuts for Linux laptop
+      window.addEventListener('keydown', (e) => {
+        if (e.target.tagName === 'INPUT') return;
+        if (!settingsOverlay.classList.contains('hidden') || !labelModal.classList.contains('hidden')) return;
+        const cx = window.innerWidth / 2;
+        const cy = window.innerHeight / 2;
+        if (e.code === 'Space') {
+          e.preventDefault();
+          togglePlayPause(cx, cy);
+        } else if (e.code === 'ArrowRight' || e.key.toLowerCase() === 'n') {
+          e.preventDefault();
+          switchNextSession(cx, cy);
+        }
+      });
+
+      // Bottom-left Settings Drawer
+      openSettingsBtn.addEventListener('click', () => {
+        settingsOverlay.classList.remove('hidden');
+        renderStats();
+        renderProfile();
+      });
+      closeSettingsBtn.addEventListener('click', () => settingsOverlay.classList.add('hidden'));
+
+      subTabStats.addEventListener('click', () => {
+        panelStats.classList.remove('hidden');
+        panelProfile.classList.add('hidden');
+        panelProfile.classList.remove('flex');
+        subTabStats.className = 'py-3 text-xs font-medium text-emerald-300 border-b-2 border-emerald-300 transition';
+        subTabProfile.className = 'py-3 text-xs font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition';
+        renderStats();
+      });
+
+      subTabProfile.addEventListener('click', () => {
+        panelStats.classList.add('hidden');
+        panelProfile.classList.remove('hidden');
+        panelProfile.classList.add('flex');
+        subTabProfile.className = 'py-3 text-xs font-medium text-emerald-300 border-b-2 border-emerald-300 transition';
+        subTabStats.className = 'py-3 text-xs font-medium text-gray-500 border-b-2 border-transparent hover:text-gray-300 transition';
+        renderProfile();
+      });
+
+      // Bottom-right Label Picker
+      openLabelBtn.addEventListener('click', () => {
+        renderLabels();
+        labelModal.classList.remove('hidden');
+      });
+      closeLabelBtn.addEventListener('click', () => labelModal.classList.add('hidden'));
+      endEarlyBtn.addEventListener('click', endEarlySession);
+      sessionCountPill.addEventListener('click', () => {
+        settingsOverlay.classList.remove('hidden');
+        subTabStats.click();
+      });
+
+      addLabelForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const val = newLabelInput.value.trim();
+        if (!val) return;
+        if (!state.labels.includes(val)) state.labels.push(val);
+        state.activeLabel = val;
+        newLabelInput.value = '';
+        saveState();
+        renderLabels();
+        renderTimer();
+        labelModal.classList.add('hidden');
+        syncWithCloud(true);
+      });
+
+      // Profile Controls
+      function updateDuration(type, val) {
+        if (type === 'focus') {
+          state.focusMinutes = clampInt(val, 1, 360, 25);
+          profFocusInput.value = state.focusMinutes;
+          if (mode === 'focus' && !isRunning) {
+            totalSeconds = state.focusMinutes * 60;
+            remainingSeconds = totalSeconds;
+          }
+        } else {
+          state.breakMinutes = clampInt(val, 1, 120, 5);
+          profBreakInput.value = state.breakMinutes;
+          if (mode === 'break' && !isRunning) {
+            totalSeconds = state.breakMinutes * 60;
+            remainingSeconds = totalSeconds;
+          }
+        }
+        saveState();
+        renderTimer();
+      }
+
+      document.getElementById('profFocusMinus').addEventListener('click', () => updateDuration('focus', state.focusMinutes - 5));
+      document.getElementById('profFocusPlus').addEventListener('click', () => updateDuration('focus', state.focusMinutes + 5));
+      profFocusInput.addEventListener('change', (e) => updateDuration('focus', e.target.value));
+
+      document.getElementById('profBreakMinus').addEventListener('click', () => updateDuration('break', state.breakMinutes - 1));
+      document.getElementById('profBreakPlus').addEventListener('click', () => updateDuration('break', state.breakMinutes + 1));
+      profBreakInput.addEventListener('change', (e) => updateDuration('break', e.target.value));
+
+      document.querySelectorAll('.profile-preset').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const [f, b] = btn.getAttribute('data-profile').split('-').map(Number);
+          updateDuration('focus', f);
+          updateDuration('break', b);
+          showToast(`Profile: ${f}m / ${b}m`);
+        });
+      });
+
+      toggleSoundBtn.addEventListener('click', () => {
+        state.soundEnabled = !state.soundEnabled;
+        saveState();
+        renderProfile();
+      });
+
+      document.getElementById('resetTimerNowBtn').addEventListener('click', () => {
+        pauseTimer();
+        totalSeconds = (mode === 'focus' ? state.focusMinutes : state.breakMinutes) * 60;
+        remainingSeconds = totalSeconds;
+        renderTimer();
+        showToast('Timer reset');
+      });
+
+      document.getElementById('clearHistoryBtn').addEventListener('click', () => {
+        state.sessions = [];
+        saveState();
+        renderStats();
+        renderTimer();
+        syncWithCloud(true);
+        showToast('History cleared');
+      });
+
+      document.getElementById('genSyncKeyBtn').addEventListener('click', () => {
+        createCloudSyncId();
+      });
+
+      saveCloudBtn.addEventListener('click', () => {
+        const token = ghTokenInput.value.trim();
+        const gid = cleanGistId(syncKeyInput.value);
+        syncKeyInput.value = gid;
+        state.ghToken = token;
+        state.syncKey = gid;
+        saveState();
+        if (!token || !gid) {
+          updateCloudBadge('Enter Token & Gist ID', false);
+          showToast('Enter Token and Gist ID (or click Create)');
+          return;
+        }
+        syncWithCloud(false);
+      });
+
+      // Init
+      renderTimer();
+      renderLabels();
+      if (state.ghToken && state.syncKey) {
+        syncWithCloud(true);
+      }
+      setInterval(() => { if (state.ghToken && state.syncKey) syncWithCloud(true); }, 60000);
+    })();
+  </script>
+</body>
+</html>
